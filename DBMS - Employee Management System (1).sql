@@ -1,0 +1,8 @@
+USE MASTER;
+GO
+
+ALTER DATABASE EmployeeManagementDB SET Single_User WITH ROLLBACK IMMEDIATE;
+GO
+
+DROP DATABASE EmployeeManagementDB;
+GO
