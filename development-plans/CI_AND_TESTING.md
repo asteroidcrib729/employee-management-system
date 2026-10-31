@@ -54,7 +54,7 @@ uv run pip-audit --strict --no-deps --disable-pip --requirement .local/audit-req
 git diff --check
 ```
 
-The tool installer creates `.local/ci-tools/`; the final audit export also uses ignored `.local/`. On Linux, omit `.exe` from tool names. The local results were obtained on Windows; the hosted Ubuntu jobs remain a separate verification gate.
+The tool installer creates `.local/ci-tools/`; the final audit export also uses ignored `.local/`. On Linux, omit `.exe` from tool names. Local Windows results and hosted Windows/Ubuntu results are recorded separately below.
 
 ## Azure preview and production acceptance
 
@@ -101,11 +101,27 @@ The nine tests per environment cover:
 | Gitleaks history/source scans | No leaks found; detector/redaction self-test passed |
 | Locked dependency vulnerability audit | No known vulnerabilities found |
 
-The live run completed 18 tests in approximately 168 seconds. Its transcript is stored locally under ignored `.local/azure/acceptance-test.log`. The unit and coverage results are separate from this live run; skipped tests are not counted as passes.
+The initial live run completed 18 tests in approximately 168 seconds. Its transcript is stored locally under ignored `.local/azure/acceptance-test.log`. The post-hardening run completed all 18 again in 148 seconds, recorded in `.local/azure/acceptance-after-journal.log`. Unit and coverage results are separate from these live runs; skipped tests are not counted as passes.
 
 The initial cold Azure connections returned resume error 40613. Connection opening now retries only that error with bounded 5, 10 and 15-second waits. Regression tests verify retry exhaustion, no retries for authentication failures and sanitized diagnostics. Reads of different configuration files no longer mutate process environment variables or contaminate subsequent environment selection.
 
-Hosted GitHub Actions, CodeQL execution and Dependabot update PRs have not run for these unpublished changes. The native SQL Server 2022 hosted job is configured and linted; actual platform execution remains a separate hosted check. Both integration contracts have now executed against temporary Azure SQL databases. Existing production/preview schemas were not migrated or reset. Billing statements, recovery drills and application hosting are outside these checks.
+Hosted GitHub Actions and CodeQL have passed at the recorded revision below. Both integration contracts have also executed against temporary Azure SQL databases. Existing production/preview schemas were not migrated or reset. Billing statements, recovery drills and application hosting are outside these checks.
+
+## Hosted verification
+
+Verified 2026-11-01, Asia/Karachi, at revision [`325e7ba369810c23bd12fbe33ea2febbe6ab3cc9`](https://github.com/asteroidcrib729/employee-management-system/commit/325e7ba369810c23bd12fbe33ea2febbe6ab3cc9). These immutable run links record that revision; the README badges link to current branch results.
+
+| Workflow | Result and executed checks |
+| --- | --- |
+| [Quality and tests](https://github.com/asteroidcrib729/employee-management-system/actions/runs/41237887179) | Passed: lint, formatting, repository/package/license validation, Actionlint, Windows and Ubuntu unit tests, and both LocalDB integration contracts |
+| [Security](https://github.com/asteroidcrib729/employee-management-system/actions/runs/41237887178) | Passed: full-history/source secret scanning, locked dependency audit, and CodeQL Python/Actions analysis |
+| Dependabot startup | All four automatic runs passed: [41236559881](https://github.com/asteroidcrib729/employee-management-system/actions/runs/41236559881), [41236559941](https://github.com/asteroidcrib729/employee-management-system/actions/runs/41236559941), [41236564603](https://github.com/asteroidcrib729/employee-management-system/actions/runs/41236564603), [41236565116](https://github.com/asteroidcrib729/employee-management-system/actions/runs/41236565116), triggered by initial publication `f3de4e1` |
+
+Each hosted unit job executed 52 tests, skipped the 20 explicitly gated database tests, and reported 92% branch-aware application coverage. The separate LocalDB job executed both integration tests, including schema initialization, seed idempotency, constraints, legacy migration/rollback and password upgrade. Its recorded engine was SQL Server 2025 LocalDB `17.0.4025.3`; that hosted image supplied ODBC Driver 17 for the local-only contract, while live Azure checks used Driver 18. The owned LocalDB instance was stopped and deleted successfully.
+
+Dependency review is a pull-request-only job and was intentionally skipped on these push runs; it is configured, not claimed as executed here. Dependabot completed its update checks without opening an update PR at this verification point. See the CodeQL triage section for the explicitly reviewed legacy-hash alert; scan execution remains enabled without query exclusions.
+
+The first Linux SQL bootstrap stalled and its workflow was cancelled. The successful LocalDB run supersedes it; no Azure database was involved in that cancelled attempt. All workflow jobs use standard GitHub-hosted runners for this public repository, with no paid runner or Azure integration-test credentials configured.
 
 ## Run schema and migration integration without local database software
 
