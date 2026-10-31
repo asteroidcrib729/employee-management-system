@@ -11,7 +11,7 @@ Verification date: **2026-11-01**, Asia/Karachi. The launch commands are `uv run
 | Repository validation | Python pin, syntax, duplicate YAML keys, workflow permissions, immutable action pins, private-file boundaries, local documentation links and original artifact hashes |
 | Actionlint | Workflow syntax, expressions, action inputs and supported runner settings |
 | Packaging | Locked build; Python/license metadata, LICENSE/NOTICE bytes, SQL resources, required docs and exclusion of secrets/local data |
-| SQL Server integration | SQL Server 2022 Developer installed directly on GitHub's temporary Ubuntu runner; fresh setup, repeated seed, constraints and original-schema migration/rollback |
+| SQL Server integration | Preinstalled SQL Server Express LocalDB on GitHub's temporary Windows runner; fresh setup, repeated seed, constraints and original-schema migration/rollback |
 | Gitleaks | Full Git history plus a snapshot of publishable source; standard detectors and a database-password detector, with redacted output |
 | Dependency audit | Runtime and development packages exported from the lock file and checked with pip-audit |
 | Dependency review | Pull requests reject introduced vulnerable dependencies at low severity or above |
@@ -20,9 +20,15 @@ Verification date: **2026-11-01**, Asia/Karachi. The launch commands are `uv run
 
 The security workflow also runs weekly and can be dispatched manually. Workflows default to read-only repository access; only CodeQL receives permission to upload security results. Actions use verified immutable commit SHAs. The Actionlint and Gitleaks installers verify pinned official release SHA-256 hashes before extracting a single executable. Dependabot updates action pins; standalone tool versions and checksums are maintained in `.github/ci-tools.json`.
 
-The hosted runner installs SQL Server Developer directly from Microsoft's package repository, binds it to loopback, uses a freshly generated masked password and stops the service afterward. The runner is discarded by GitHub. Docker and a local SQL Server installation are not required. This follows Microsoft's [Ubuntu installation](https://learn.microsoft.com/en-us/sql/linux/install-upgrade/quickstart-install-ubuntu) and [network configuration](https://learn.microsoft.com/en-us/sql/linux/configure/mssql-conf) guidance. GitHub Actions receives no Azure passwords or access tokens and never targets the production/preview databases. No automatic merge or deployment is configured.
+The hosted Windows runner uses its preinstalled SQL Server Express LocalDB runtime. The job creates an instance named for its exact run ID/attempt, uses Windows authentication over a local connection, and deletes only that owned instance afterward. Startup, readiness and cleanup are bounded separately. An installed ODBC 18 driver is preferred, with 17 accepted for this local integration contract. `Encrypt=no` applies only to LocalDB on the disposable runner; the Azure runtime configuration still requires encrypted transport and certificate validation. No SQL password is generated or persisted. The runner is discarded by GitHub. Docker and a local SQL Server installation are not required. See the [official runner image](https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md) and [Microsoft LocalDB utility documentation](https://learn.microsoft.com/en-us/sql/tools/sqllocaldb-utility). GitHub Actions receives no Azure passwords or tokens and never targets production/preview. No automatic merge or deployment is configured.
 
 The source secret scanner includes untracked publishable files during local work. It builds a temporary snapshot using Git's tracked/non-ignored file list, leaving ignored local secrets outside the snapshot. Before scanning, it verifies that a generated nonfunctional password is detected and redacted. This is distinct from enabling GitHub's repository-level secret scanning/push protection settings.
+
+### CodeQL legacy-password triage
+
+The first published scan reported `py/weak-sensitive-data-hashing` at the SHA-256 comparison in [security.py](../src/ems/security.py). Alert 1 was reviewed and dismissed as a false positive for **new password storage**: the comparison runs only for an existing 64-hex legacy digest, does not return a new stored hash, and requests an upgrade on successful verification. [Service.login](../src/ems/service.py) writes a randomly salted PBKDF2-SHA256 hash at 600,000 iterations in the same transaction before establishing the authenticated session. New/bootstrap accounts always use PBKDF2.
+
+The ORM regression tests verify legacy upgrade and failure-to-commit behavior. Live database verification found only current PBKDF2 hashes in both configured environments. Legacy databases may still contain weak old hashes until upgrade; that migration risk is not dismissed or approved for new accounts. All extended CodeQL queries remain enabled; no query, path or line suppression was added. This triage does not authorize introducing fast hashes into any storage path.
 
 ## Reproduce local checks
 
