@@ -1,0 +1,9 @@
+title = "Employee Management System secret scanning"
+[extend]
+useDefault = true
+[[rules]]
+id = "database-connection-password"
+description = "Password embedded in a database connection string"
+regex = '''(?i)PWD\s*=\s*\{?([^;}\r\n'"<>]{12,})'''
+secretGroup = 1
+entropy = 3.5

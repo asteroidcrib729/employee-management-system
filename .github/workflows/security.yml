@@ -1,0 +1,76 @@
+name: Security
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '45 4 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  secrets:
+    name: Secrets in history and source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.12.9'
+      - run: uv sync --locked
+      - run: uv run --locked python scripts/install_ci_tool.py gitleaks
+      - run: .local/ci-tools/gitleaks git --redact --no-banner --log-opts=--all .
+      - run: uv run --locked python scripts/scan_source_secrets.py
+  dependency-audit:
+    name: Locked dependency vulnerabilities
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.12.9'
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Export runtime and development dependencies
+        run: |
+          mkdir -p .local
+          uv export --locked --no-emit-project --no-hashes --format requirements-txt --output-file .local/audit-requirements.txt
+      - run: uv run --locked pip-audit --strict --no-deps --disable-pip --requirement .local/audit-requirements.txt
+  dependency-review:
+    name: Review pull request dependencies
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: low
+  codeql:
+    name: CodeQL Python and Actions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+        with:
+          languages: python,actions
+          build-mode: none
+          queries: security-extended
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4

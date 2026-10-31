@@ -1,0 +1,101 @@
+name: Quality and tests
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  quality:
+    name: Lint, configuration and packaging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.12.9'
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv lock --check
+      - run: uv run --locked ruff check .
+      - run: uv run --locked ruff format --check .
+      - run: uv run --locked python scripts/validate_repository.py
+      - run: uv run --locked python scripts/install_ci_tool.py actionlint
+      - run: .local/ci-tools/actionlint
+      - run: uv build
+      - run: uv run --locked python scripts/validate_package.py
+      - run: git diff --exit-code
+  unit:
+    name: Unit tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.12.9'
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run --locked coverage run -m unittest discover -s tests -v
+      - run: uv run --locked coverage report
+      - run: uv run --locked python -m ems --help
+      - run: uv run --locked ems production --help
+  sql-server:
+    name: Native SQL Server integration
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.12.9'
+          enable-cache: true
+      - name: Install SQL Server Developer and ODBC on the hosted runner
+        run: |
+          curl --fail --silent --show-error --location --output /tmp/packages-microsoft-prod.deb https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb
+          sudo dpkg -i /tmp/packages-microsoft-prod.deb
+          curl --fail --silent --show-error --location https://packages.microsoft.com/config/ubuntu/22.04/mssql-server-2022.list | sudo tee /etc/apt/sources.list.d/mssql-server-2022.list
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y mssql-server msodbcsql18 unixodbc-dev
+      - run: uv sync --locked
+      - name: Configure native SQL Server with an ephemeral password
+        shell: bash
+        run: |
+          sql_password="$(uv run --locked python -c 'import secrets; print("Ci9!" + secrets.token_hex(24))')"
+          echo "::add-mask::$sql_password"
+          echo "EMS_TEST_SERVER_CONNECTION=DRIVER={ODBC Driver 18 for SQL Server};SERVER=localhost,1433;DATABASE=master;UID=sa;PWD={$sql_password};Encrypt=yes;TrustServerCertificate=yes;" >> "$GITHUB_ENV"
+          sudo env ACCEPT_EULA=Y MSSQL_PID=Developer MSSQL_SA_PASSWORD="$sql_password" MSSQL_MEMORY_LIMIT_MB=2048 /opt/mssql/bin/mssql-conf -n setup
+          sudo /opt/mssql/bin/mssql-conf set network.ipaddress 127.0.0.1
+          sudo systemctl restart mssql-server
+      - name: Wait for the disposable SQL Server
+        run: |
+          uv run --locked python - <<'PY'
+          import os, time, pyodbc
+          for attempt in range(30):
+              try:
+                  connection = pyodbc.connect(os.environ['EMS_TEST_SERVER_CONNECTION'], timeout=2)
+                  connection.close()
+                  break
+              except pyodbc.Error:
+                  if attempt == 29:
+                      raise SystemExit('Disposable SQL Server did not become ready') from None
+                  time.sleep(2)
+          PY
+      - run: uv run --locked python -m unittest discover -s tests -p test_sql_server.py -v
+      - name: Stop native test SQL Server
+        if: always()
+        run: sudo systemctl stop mssql-server || true

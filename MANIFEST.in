@@ -1,0 +1,18 @@
+include README.md uv.lock .env.example .python-version
+include LICENSE NOTICE
+include .gitleaks.toml
+recursive-include .github *.yml *.json
+recursive-include scripts *.py
+recursive-include src/ems *.py *.sql
+recursive-include tests *.py
+recursive-include development-plans *.md
+include development-plans/legacy/original-hashes.json development-plans/legacy/original-source.zip
+prune .uv-cache
+prune .local
+prune .venv
+prune .git
+prune build
+prune dist
+prune .ruff_cache
+global-exclude __pycache__ *.py[cod]
+exclude .env
